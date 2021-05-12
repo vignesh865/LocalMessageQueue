@@ -4,7 +4,7 @@ import java.io.IOException;
 
 public interface QueueService {
 
-	boolean push(String message) throws IOException;
+	int push(String message) throws IOException;
 
 	String pull() throws IOException;
 

@@ -13,18 +13,20 @@ public class FileQueue {
 	private final FileChannel channel;
 	private final MappedByteBuffer datasource;
 
-	private static final int STORAGE_SIZE = 104857600 * 10;
+	// 500 mb
+	public static final int DEFAULT_STORAGE_SIZE = 524288000;
+	private static final String EXTENSION = ".queue";
 
 	public FileQueue(String queueName) throws IOException {
 		this.queueName = queueName;
-		this.file = new RandomAccessFile(String.format("%s.queue", queueName), "rw");
+		this.file = new RandomAccessFile(String.format("%s%s", queueName, EXTENSION), "rw");
 		this.channel = this.file.getChannel();
-		this.datasource = channel.map(FileChannel.MapMode.READ_WRITE, 0, STORAGE_SIZE);
+		this.datasource = channel.map(FileChannel.MapMode.READ_WRITE, 0, DEFAULT_STORAGE_SIZE);
 	}
 
 	public FileQueue(String queueName, int storageSize) throws IOException {
 		this.queueName = queueName;
-		this.file = new RandomAccessFile(String.format("%s.queue", queueName), "rw");
+		this.file = new RandomAccessFile(String.format("%s%s", queueName, EXTENSION), "rw");
 		this.channel = this.file.getChannel();
 		this.datasource = channel.map(FileChannel.MapMode.READ_WRITE, 0, storageSize);
 	}
@@ -49,14 +51,15 @@ public class FileQueue {
 		datasource.position(position);
 	}
 
-	public void writeString(String message) {
-		datasource.put(CommonUtils.toBinaryString(message.length()).getBytes());
+	public void writeString(String message, MessageStatus status) {
+		writeInt(message.length());
 		datasource.put(message.getBytes());
+		writeShortInt(status.status);
 	}
 
-	public void writeString(String message, int at) {
+	public void writeString(String message, int at, MessageStatus status) {
 		setPosition(at);
-		writeString(message);
+		writeString(message, status);
 	}
 
 	public void writeBool(boolean flag, int at) {
@@ -74,6 +77,15 @@ public class FileQueue {
 
 	public void writeInt(int value) {
 		datasource.put(CommonUtils.toBinaryString(value).getBytes());
+	}
+
+	public void writeShortInt(int value) {
+		datasource.put(CommonUtils.toShortString(value).getBytes());
+	}
+
+	public void writeShortInt(int value, int at) {
+		setPosition(at);
+		datasource.put(CommonUtils.toShortString(value).getBytes());
 	}
 
 	public void writeInt(int value, int at) {
@@ -98,6 +110,11 @@ public class FileQueue {
 	public int fetchInt(int at) {
 		setPosition(at);
 		return fetchInt();
+	}
+
+	public int fetchShortInt(int at) {
+		setPosition(at);
+		return CommonUtils.nextShortInt(datasource);
 	}
 
 	public void destroy() throws IOException {

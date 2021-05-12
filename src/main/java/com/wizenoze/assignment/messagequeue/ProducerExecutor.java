@@ -2,23 +2,27 @@ package com.wizenoze.assignment.messagequeue;
 
 import java.io.IOException;
 import java.nio.BufferOverflowException;
-import java.nio.channels.FileLock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+/*
+ * 
+ *  Message count upper limit for 100 mb: ~2303665 
+ *  Message count upper limit for 200 mb: ~4583178 
+ *  Message count upper limit for 500 mb: ~11445873
+
+ */
 public class ProducerExecutor {
 
-	// testing2303665 100mb
-	// testing4583178 200mb
-	// 1,14,45,873 500mb
+	private int queueSize = FileQueue.DEFAULT_STORAGE_SIZE;
 
 	public static void main(String[] args) throws Exception {
-		execute(args[0], Integer.parseInt(args[1]), Integer.parseInt(args[2]));
+		ProducerExecutor producer = new ProducerExecutor();
+		producer.execute(args[0], Integer.parseInt(args[1]), Integer.parseInt(args[2]));
 	}
 
-	public static void execute(String topic, int messageCount, int producercount)
-			throws IOException, InterruptedException {
+	public void execute(String topic, int messageCount, int producercount) throws IOException, InterruptedException {
 		ExecutorService executor = Executors.newFixedThreadPool(producercount);
 
 		int currentProducer = 0;
@@ -30,17 +34,10 @@ public class ProducerExecutor {
 		executor.shutdown();
 		executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
 
-		markPushEnd(topic);
+		CommonUtils.markPushEnd(topic);
 	}
 
-	private static void markPushEnd(String queueName) throws IOException {
-		FileQueue pushStatusQueue = new FileQueue(queueName + "-pushStatus", 1);
-		FileLock lock = pushStatusQueue.getLock();
-		pushStatusQueue.writeBool(true, 0);
-		lock.release();
-	}
-
-	private static class Producer implements Runnable {
+	private class Producer implements Runnable {
 
 		final String producerId;
 		final QueueService queue;
@@ -48,7 +45,7 @@ public class ProducerExecutor {
 
 		Producer(String producerId, String topic, int messageCount) throws IOException {
 			this.producerId = producerId;
-			this.queue = new FileBasedQueueService(topic);
+			this.queue = new FileBasedQueueService(topic, queueSize);
 			this.messageCount = messageCount;
 		}
 
@@ -62,16 +59,16 @@ public class ProducerExecutor {
 
 		}
 
-		private static void produce(String producerId, QueueService testQueue, int messageCount)
+		private void produce(String producerId, QueueService queue, int messageCount)
 				throws IOException, InterruptedException {
 
 			int currentMessageCount = 0;
-			while (currentMessageCount <= messageCount) {
+			while (currentMessageCount < messageCount) {
 				String msg = String.format("%s-%s", producerId, currentMessageCount);
 
 				try {
 
-					boolean isSuccessful = testQueue.push(msg);
+					boolean isSuccessful = queue.push(msg) != FileBasedQueueService.INVALID_POSITON;
 					if (isSuccessful) {
 						currentMessageCount++;
 					}
@@ -87,4 +84,7 @@ public class ProducerExecutor {
 		}
 	}
 
+	public void setDatasourceSize(int dataSourceSize) {
+		this.queueSize = dataSourceSize;
+	}
 }
