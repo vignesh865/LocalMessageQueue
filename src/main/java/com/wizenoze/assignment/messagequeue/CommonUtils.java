@@ -5,6 +5,7 @@ import java.io.FilenameFilter;
 import java.io.IOException;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -71,10 +72,24 @@ public class CommonUtils {
 	}
 
 	public static void markPushEnd(String queueName) throws IOException {
-		FileQueue pushStatusQueue = new FileQueue(queueName + "-pushStatus", 1);
-		FileLock lock = pushStatusQueue.getLock();
-		pushStatusQueue.writeBool(true, 0);
-		lock.release();
+		FileQueue queue = new FileQueue(QueueService.getPushStatusQueueName(queueName), 1);
+		markPushEnd(queue);
+		queue.destroy();
+	}
+
+	private static void markPushEnd(FileQueue pushStatusQueue) throws IOException {
+		FileLock lock = null;
+		try {
+			lock = pushStatusQueue.getLock();
+			pushStatusQueue.writeBool(true, 0);
+
+		} catch (OverlappingFileLockException exception) {
+			return;
+		} finally {
+			if (lock != null) {
+				lock.release();
+			}
+		}
 	}
 
 	public static List<File> getFiles(String dirName, String extension) {

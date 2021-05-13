@@ -3,25 +3,35 @@ package com.wizenoze.assignment.messagequeue;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.apache.commons.io.FileUtils;
 import org.junit.AfterClass;
 import org.junit.Test;
 
 public class QueueServiceTest {
 
+	/**
+	 * Used to terminate the consumers. Signaling from producer will also happen to
+	 * terminate the consumer.
+	 */
+	private ExecutorService consumerTerminator = Executors.newSingleThreadExecutor();
+
 	@Test
 	public void testMessageCount() throws IOException, InterruptedException {
+
+		System.out.println("\nTest name: testMessageCount \n");
 
 		String queueName = "testMessageCount" + UUID.randomUUID();
 
@@ -43,22 +53,28 @@ public class QueueServiceTest {
 		executor.setDatasourceSize(datasourceSize);
 		executor.dontPrintMessages();
 
+		executeConsumer(executor, queueName, consumerThreadCount);
 		/*
 		 * Consuming from 1 thread
 		 */
-		int consumedCount = executor.execute(queueName, consumerThreadCount);
+		int consumedCount = executor.getTotalMessageConsumed();
 
 		assertEquals(produceCountPerThread * consumerThreadCount, consumedCount);
 	}
 
 	@Test
-	public void testMessageCountWithMultipeThreadProducer() throws IOException, InterruptedException {
+	public void testMessageCountWithMultipeThreadProducerConsumer() throws IOException, InterruptedException {
+
+		System.out.println("\nTest name: testMessageCountWithMultipeThreadProducerConsumer \n");
 
 		String queueName = "testMessageCount" + UUID.randomUUID();
 
 		int datasourceSize = 1024 * 20;
 		int producerThreadCount = 3;
-		int consumerThreadCount = 1;
+		int consumerThreadCount = 2;
+
+		System.out.println("Producer count - " + producerThreadCount);
+		System.out.println("Consumer count - " + consumerThreadCount);
 
 		int produceCountPerThread = 100;
 
@@ -69,7 +85,9 @@ public class QueueServiceTest {
 		ConsumerExecutor executor = new ConsumerExecutor();
 		executor.setDatasourceSize(datasourceSize);
 		executor.dontPrintMessages();
-		int consumedCount = executor.execute(queueName, consumerThreadCount);
+
+		executeConsumer(executor, queueName, consumerThreadCount);
+		int consumedCount = executor.getTotalMessageConsumed();
 
 		/*
 		 * TotalPushedCount = produceCountPerThread * consumerThreadCount
@@ -78,15 +96,17 @@ public class QueueServiceTest {
 	}
 
 	@Test
-	public void testMessageCountWithDifferentQueue() throws IOException, InterruptedException {
+	public void testMessageCountWithMultipleQueue() throws IOException, InterruptedException {
+
+		System.out.println("\nTest name: testMessageCountWithMultipleQueue \n");
 
 		int datasourceSize = 1024 * 20;
 		int producerThreadCount = 3;
 		int consumerThreadCount = 1;
 
-		int produceCountPerThread = 100;
+		int produceCountPerThread = 10;
 
-		String queueName1 = "testMessageCountWithDifferentQueue1" + UUID.randomUUID();
+		String queueName1 = "testMessageCountWithMultipleQueue1" + UUID.randomUUID();
 
 		/**
 		 * Pushing to two different queues
@@ -95,22 +115,29 @@ public class QueueServiceTest {
 		producerExecutor1.setDatasourceSize(datasourceSize);
 		producerExecutor1.execute(queueName1, produceCountPerThread, producerThreadCount);
 
-		String queueName2 = "testMessageCountWithDifferentQueue2" + UUID.randomUUID();
+		ConsumerExecutor executor1 = new ConsumerExecutor().setDatasourceSize(datasourceSize).dontPrintMessages();
+		executeConsumer(executor1, queueName1, consumerThreadCount);
+
+		int consumedCountForQueue1 = executor1.getTotalMessageConsumed();
+		assertEquals(produceCountPerThread * producerThreadCount, consumedCountForQueue1);
+
+		String queueName2 = "testMessageCountWithMultipleQueue2" + UUID.randomUUID();
 		ProducerExecutor producerExecutor2 = new ProducerExecutor();
 		producerExecutor2.setDatasourceSize(datasourceSize);
 		producerExecutor2.execute(queueName2, produceCountPerThread, producerThreadCount);
 
-		int consumedCountForQueue1 = new ConsumerExecutor().setDatasourceSize(datasourceSize).dontPrintMessages()
-				.execute(queueName1, consumerThreadCount);
-		assertEquals(produceCountPerThread * producerThreadCount, consumedCountForQueue1);
+		ConsumerExecutor executor2 = new ConsumerExecutor().setDatasourceSize(datasourceSize).dontPrintMessages();
+		executeConsumer(executor2, queueName2, consumerThreadCount);
 
-		int consumedCountForQueue2 = new ConsumerExecutor().setDatasourceSize(datasourceSize).dontPrintMessages()
-				.execute(queueName2, consumerThreadCount);
+		int consumedCountForQueue2 = executor2.getTotalMessageConsumed();
 		assertEquals(produceCountPerThread * producerThreadCount, consumedCountForQueue2);
 	}
 
 	@Test
 	public void testMessageOrder() throws IOException, InterruptedException {
+
+		System.out.println("\nTest name: testMessageOrder \n");
+
 		String queueName = "testMessageOrder" + UUID.randomUUID();
 
 		int datasourceSize = 1024 * 5;
@@ -123,6 +150,8 @@ public class QueueServiceTest {
 		List<String> pushList = IntStream.range(0, produceCountPerThread).boxed().map(num -> messagePrefix + num)
 				.collect(Collectors.toList());
 
+		System.out.println("\nPushing these messages - " + pushList);
+
 		for (String message : pushList) {
 			queueService.push(message);
 		}
@@ -131,18 +160,23 @@ public class QueueServiceTest {
 
 		ConsumerExecutor executor = new ConsumerExecutor().setDatasourceSize(datasourceSize).dontPrintMessages()
 				.collectMessages();
-		executor.execute(queueName, consumerThreadCount);
+		executeConsumer(executor, queueName, consumerThreadCount);
 
 		List<String> collectedMessages = new ArrayList<>(executor.getMessages());
+		System.out.println("\n\nConsumed messages - " + collectedMessages);
 		assertTrue(pushList.equals(collectedMessages));
 	}
 
 	@Test
 	public void testMessageOfDifferentLength() throws IOException, InterruptedException {
+
+		System.out.println("\nTest name: testMessageOfDifferentLength \n");
+
 		String queueName = "testMessageOfDifferentLength" + UUID.randomUUID();
 		QueueService queueService = new FileBasedQueueService(queueName, 1000);
 
 		List<String> pushList = Arrays.asList("Length1", "Length123", "123Length123Length", "f");
+		System.out.println("\nPushing these messages - " + pushList);
 
 		for (String message : pushList) {
 			queueService.push(message);
@@ -153,14 +187,19 @@ public class QueueServiceTest {
 		ConsumerExecutor executor = new ConsumerExecutor();
 		executor.dontPrintMessages();
 		executor.collectMessages();
-		executor.execute(queueName, 1);
+
+		executeConsumer(executor, queueName, 1);
 
 		List<String> collectedMessages = new ArrayList<>(executor.getMessages());
+		System.out.println("Consumed messages - " + collectedMessages);
 		assertTrue(pushList.equals(collectedMessages));
 	}
 
 	@Test
 	public void testDelete() throws IOException, InterruptedException {
+
+		System.out.println("\nTest name: testDelete \n");
+
 		String queueName = "delete" + UUID.randomUUID();
 		QueueService queueService = new FileBasedQueueService(queueName, 1000);
 
@@ -169,19 +208,29 @@ public class QueueServiceTest {
 		int deleteMessageId = queueService.push("DeleteTestMessage3");
 		queueService.push("DeleteMessage4");
 
+		System.out.println("\nPushing these messages - " + Arrays.asList("DeleteTestMessage1", "DeleteTestMessage2",
+				"DeleteTestMessage3", "DeleteTestMessage4"));
+
 		CommonUtils.markPushEnd(queueName);
 
+		System.out.println("Deleting message DeleteTestMessage3");
 		queueService.delete(deleteMessageId);
 
 		ConsumerExecutor executor = new ConsumerExecutor();
-		executor.dontPrintMessages();
-		int consumedCount = executor.execute(queueName, 1);
+		executor.dontPrintMessages().collectMessages();
+		executeConsumer(executor, queueName, 1);
 
+		int consumedCount = executor.getTotalMessageConsumed();
+		List<String> collectedMessages = new ArrayList<>(executor.getMessages());
+		System.out.println("Consumed messages - " + collectedMessages);
 		assertEquals(3, consumedCount);
 	}
 
 	@Test(expected = IllegalArgumentException.class)
 	public void testDeleteFailsIfAlreadyProcessed() throws IOException, InterruptedException {
+
+		System.out.println("\nTest name: testDeleteFailsIfAlreadyProcessed \n");
+
 		String queueName = "delete" + UUID.randomUUID();
 		QueueService queueService = new FileBasedQueueService(queueName, 1000);
 
@@ -194,15 +243,15 @@ public class QueueServiceTest {
 
 		ConsumerExecutor executor = new ConsumerExecutor();
 		executor.dontPrintMessages();
-		int messageCount = executor.execute(queueName, 1);
 
-		assertEquals(4, messageCount);
+		executeConsumer(executor, queueName, 1);
 
 		/*
 		 * Trying to delete consumed message will result in IllegalArgumentException
 		 * exception
 		 */
 		queueService.delete(deleteMessageId);
+		System.out.println("Illegal argument exception should be thrown");
 	}
 
 	/*
@@ -217,12 +266,17 @@ public class QueueServiceTest {
 	 */
 	@Test
 	public void testTimeout() throws IOException, InterruptedException {
+
+		System.out.println("\nTest name: testTimeout \n");
+
 		String queueName = "testTimeout" + UUID.randomUUID();
 		QueueService queueService = new FileBasedQueueService(queueName, 1000);
 
 		String sentinelMessage = "ERROR_MESSAGE";
 
 		List<String> pushList = Arrays.asList("Length1", "Length123", sentinelMessage, "123Length123Length", "f");
+
+		System.out.println("Pushing these messages" + pushList);
 
 		for (String message : pushList) {
 			queueService.push(message);
@@ -241,34 +295,33 @@ public class QueueServiceTest {
 
 				if (message.equals(sentinelMessage) && !alreadyThrown) {
 					alreadyThrown = true;
+					System.out.println("Problem with message - " + message);
 					throw new TimeoutException();
 				}
 
 				return true;
 			}
 
-		};
+		}.dontPrintMessages().collectMessages();
 
-		executor.dontPrintMessages();
-		executor.collectMessages();
-		executor.execute(queueName, 1);
+		executeConsumer(executor, queueName, 1);
 
 		List<String> collectedMessages = new ArrayList<>(executor.getMessages());
+		System.out.println("\nConsumed messages - " + collectedMessages);
 		assertEquals(2, Collections.frequency(collectedMessages, sentinelMessage));
 	}
 
 	@AfterClass
 	public static void tearDown() {
-
-		List<File> files = CommonUtils.getFiles(".", FileQueue.EXTENSION);
-
-		files.forEach(file -> {
-			try {
-				FileUtils.forceDelete(file);
-			} catch (IOException e) {
-				System.out.println("Problem with deleting queue file - " + file.getAbsolutePath());
-			}
-		});
+		CommonUtils.deleteAllFiles(".", FileQueue.EXTENSION);
 	}
 
+	private void executeConsumer(ConsumerExecutor consumerExecutor, String topic, int consumerCount) {
+		try {
+			consumerTerminator.submit(() -> consumerExecutor.execute(topic, consumerCount)).get(1000, TimeUnit.SECONDS);
+		} catch (InterruptedException | ExecutionException | TimeoutException e) {
+			e.printStackTrace();
+			return;
+		}
+	}
 }

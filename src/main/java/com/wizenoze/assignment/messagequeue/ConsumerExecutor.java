@@ -6,11 +6,11 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -49,14 +49,28 @@ public class ConsumerExecutor {
 			currentConsumer++;
 		}
 
+		/*
+		 * Add DLQ consumer
+		 */
+		Consumer deadLetterConsumer = new Consumer("dlqConsumer" + currentConsumer, QueueService.getDLQName(topic));
+		executor.submit(deadLetterConsumer);
+
+		futures.forEach(future -> {
+			try {
+				future.get();
+			} catch (InterruptedException | ExecutionException e) {
+				e.printStackTrace();
+			}
+		});
+
+		CommonUtils.markPushEnd(QueueService.getDLQName(topic));
+
 		executor.shutdown();
-		executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
-
 		consumers.forEach(Consumer::shutdown);
-		System.out.print("Total consumed message count - " + totalMessageConsumed.get());
+		deadLetterConsumer.shutdown();
 
+		System.out.println("Total consumed message count - " + totalMessageConsumed.get());
 		CommonUtils.deleteAllFiles(".", FileQueue.EXTENSION);
-		
 		return totalMessageConsumed.get();
 	}
 
@@ -80,7 +94,6 @@ public class ConsumerExecutor {
 		public void consume(String consumerId, QueueService queueService) throws Exception {
 
 			while (!queueService.hasAllMessagesConsumed()) {
-
 				/*
 				 * This will pull the message and call the processMessage method which can be
 				 * overridden at the time of QueueService object creation
@@ -89,7 +102,8 @@ public class ConsumerExecutor {
 				queueService.pull();
 			}
 
-			System.out.println(String.format("Total %s messages consumed by %s", consumedCount.get(), consumerId));
+			System.out.println(String.format("Total %s messages consumed by %s from %s ", consumedCount.get(),
+					consumerId, queueService.getQueueName()));
 		}
 
 		private QueueService getFileBasedQueueService(String queueName, int queueSize) throws IOException {
@@ -115,7 +129,7 @@ public class ConsumerExecutor {
 
 	}
 
-	protected boolean processConsumedMessage(String message) throws IOException, TimeoutException {
+	protected synchronized boolean processConsumedMessage(String message) throws IOException, TimeoutException {
 
 		if (shouldCollectMessages.get()) {
 			messages.add(message);
@@ -140,6 +154,10 @@ public class ConsumerExecutor {
 
 	public Queue<String> getMessages() {
 		return messages;
+	}
+
+	public int getTotalMessageConsumed() {
+		return totalMessageConsumed.get();
 	}
 
 	public ConsumerExecutor setDatasourceSize(int dataSourceSize) {

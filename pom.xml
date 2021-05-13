@@ -8,6 +8,17 @@
 	<name>Message Queue</name>
 	<description>A simple file based message queue</description>
 
+	<build>
+		<plugins>
+			<plugin>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<source>1.8</source>
+					<target>1.8</target>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
 
 	<dependencies>
 		<dependency>
@@ -27,4 +38,5 @@
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
+	
 </project>

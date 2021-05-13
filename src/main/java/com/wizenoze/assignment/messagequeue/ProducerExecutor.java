@@ -22,7 +22,7 @@ public class ProducerExecutor {
 		producer.execute(args[0], Integer.parseInt(args[1]), Integer.parseInt(args[2]));
 	}
 
-	public void execute(String topic, int messageCount, int producercount) throws IOException, InterruptedException {
+	public synchronized void execute(String topic, int messageCount, int producercount) throws IOException, InterruptedException {
 		ExecutorService executor = Executors.newFixedThreadPool(producercount);
 
 		int currentProducer = 0;
@@ -68,7 +68,7 @@ public class ProducerExecutor {
 
 				try {
 
-					boolean isSuccessful = queue.pushWithRetry(msg) != FileBasedQueueService.INVALID_POSITON;
+					boolean isSuccessful = queue.push(msg) != FileBasedQueueService.INVALID_POSITON;
 					if (isSuccessful) {
 						currentMessageCount++;
 					}
@@ -80,7 +80,8 @@ public class ProducerExecutor {
 
 			}
 
-			System.out.println(String.format("Total %s messages pushed by %s", currentMessageCount, producerId));
+			System.out.println(String.format("Total %s messages pushed by %s to %s", currentMessageCount, producerId,
+					queue.getQueueName()));
 		}
 	}
 

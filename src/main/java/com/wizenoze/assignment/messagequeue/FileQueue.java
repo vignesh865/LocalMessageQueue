@@ -12,22 +12,21 @@ public class FileQueue {
 	private final RandomAccessFile file;
 	private final FileChannel channel;
 	private final MappedByteBuffer datasource;
+	private final int storageSize;
 
 	// 500 mb 524288000 bytes
 	public static final int DEFAULT_STORAGE_SIZE = 524288000;
 	public static final String EXTENSION = ".queue";
 
 	public FileQueue(String queueName) throws IOException {
-		this.queueName = queueName;
-		this.file = new RandomAccessFile(String.format("%s%s", queueName, EXTENSION), "rw");
-		this.channel = this.file.getChannel();
-		this.datasource = channel.map(FileChannel.MapMode.READ_WRITE, 0, DEFAULT_STORAGE_SIZE);
+		this(queueName, DEFAULT_STORAGE_SIZE);
 	}
 
 	public FileQueue(String queueName, int storageSize) throws IOException {
 		this.queueName = queueName;
 		this.file = new RandomAccessFile(String.format("%s%s", queueName, EXTENSION), "rw");
 		this.channel = this.file.getChannel();
+		this.storageSize = storageSize;
 		this.datasource = channel.map(FileChannel.MapMode.READ_WRITE, 0, storageSize);
 	}
 
@@ -35,8 +34,16 @@ public class FileQueue {
 		return queueName;
 	}
 
+	public void immedieteFlush() {
+		datasource.force();
+	}
+
 	public FileLock getLock() throws IOException {
 		return channel.lock();
+	}
+
+	public FileLock getReadLock() throws IOException {
+		return channel.lock(0, storageSize, true);
 	}
 
 	public MappedByteBuffer getDatasource() {
