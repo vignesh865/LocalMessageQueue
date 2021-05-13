@@ -6,11 +6,12 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -20,8 +21,8 @@ public class ConsumerExecutor {
 
 	/*
 	 * Don't enable this flag other than testing. If normally enabled and started
-	 * the consumer and large amount of data flow through to the consumer then it
-	 * will just blow up the memory
+	 * the consumer and large amount of data flow through the consumer then it will
+	 * just blow up the memory
 	 */
 	private final AtomicBoolean shouldCollectMessages = new AtomicBoolean();
 	private final AtomicBoolean shouldPrintMessages = new AtomicBoolean(true);
@@ -34,7 +35,7 @@ public class ConsumerExecutor {
 		executor.execute(args[0], Integer.parseInt(args[1]));
 	}
 
-	public int execute(String topic, int consumerCount) throws IOException {
+	public int execute(String topic, int consumerCount) throws IOException, InterruptedException {
 		ExecutorService executor = Executors.newFixedThreadPool(consumerCount);
 
 		List<Future<Integer>> futures = new ArrayList<>();
@@ -49,20 +50,14 @@ public class ConsumerExecutor {
 		}
 
 		executor.shutdown();
-
-		int totalConsumedCount = futures.stream().mapToInt(arg0 -> {
-			try {
-				return arg0.get();
-			} catch (InterruptedException | ExecutionException e) {
-				e.printStackTrace();
-				return 0;
-			}
-		}).sum();
+		executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
 
 		consumers.forEach(Consumer::shutdown);
-
 		System.out.print("Total consumed message count - " + totalMessageConsumed.get());
-		return totalConsumedCount;
+
+		CommonUtils.deleteAllFiles(".", FileQueue.EXTENSION);
+		
+		return totalMessageConsumed.get();
 	}
 
 	private class Consumer implements Callable<Integer> {
@@ -102,17 +97,10 @@ public class ConsumerExecutor {
 			return new FileBasedQueueService(queueName, queueSize) {
 
 				@Override
-				public void processMessage(String message) throws IOException {
+				public boolean processMessage(String message) throws IOException, TimeoutException {
 					totalMessageConsumed.incrementAndGet();
 					consumedCount.incrementAndGet();
-
-					if (shouldCollectMessages.get()) {
-						messages.add(message);
-					}
-
-					if (shouldPrintMessages.get()) {
-						System.out.println(message);
-					}
+					return processConsumedMessage(message);
 				}
 			};
 		}
@@ -125,6 +113,19 @@ public class ConsumerExecutor {
 			}
 		}
 
+	}
+
+	protected boolean processConsumedMessage(String message) throws IOException, TimeoutException {
+
+		if (shouldCollectMessages.get()) {
+			messages.add(message);
+		}
+
+		if (shouldPrintMessages.get()) {
+			System.out.println(message);
+		}
+
+		return true;
 	}
 
 	public ConsumerExecutor dontPrintMessages() {

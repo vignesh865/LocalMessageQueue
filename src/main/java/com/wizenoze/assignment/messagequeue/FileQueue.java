@@ -15,7 +15,7 @@ public class FileQueue {
 
 	// 500 mb 524288000 bytes
 	public static final int DEFAULT_STORAGE_SIZE = 524288000;
-	private static final String EXTENSION = ".queue";
+	public static final String EXTENSION = ".queue";
 
 	public FileQueue(String queueName) throws IOException {
 		this.queueName = queueName;
@@ -37,10 +37,6 @@ public class FileQueue {
 
 	public FileLock getLock() throws IOException {
 		return channel.lock();
-	}
-
-	public FileLock getLock(int at, int size) throws IOException {
-		return channel.lock(at, size, false);
 	}
 
 	public MappedByteBuffer getDatasource() {

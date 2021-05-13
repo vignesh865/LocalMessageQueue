@@ -3,14 +3,19 @@ package com.wizenoze.assignment.messagequeue;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.apache.commons.io.FileUtils;
+import org.junit.AfterClass;
 import org.junit.Test;
 
 public class QueueServiceTest {
@@ -133,7 +138,7 @@ public class QueueServiceTest {
 	}
 
 	@Test
-	public void testMessageOfDifferentLength() throws IOException {
+	public void testMessageOfDifferentLength() throws IOException, InterruptedException {
 		String queueName = "testMessageOfDifferentLength" + UUID.randomUUID();
 		QueueService queueService = new FileBasedQueueService(queueName, 1000);
 
@@ -155,7 +160,7 @@ public class QueueServiceTest {
 	}
 
 	@Test
-	public void testDelete() throws IOException {
+	public void testDelete() throws IOException, InterruptedException {
 		String queueName = "delete" + UUID.randomUUID();
 		QueueService queueService = new FileBasedQueueService(queueName, 1000);
 
@@ -176,7 +181,7 @@ public class QueueServiceTest {
 	}
 
 	@Test(expected = IllegalArgumentException.class)
-	public void testDeleteFailsIfAlreadyProcessed() throws IOException {
+	public void testDeleteFailsIfAlreadyProcessed() throws IOException, InterruptedException {
 		String queueName = "delete" + UUID.randomUUID();
 		QueueService queueService = new FileBasedQueueService(queueName, 1000);
 
@@ -199,4 +204,71 @@ public class QueueServiceTest {
 		 */
 		queueService.delete(deleteMessageId);
 	}
+
+	/*
+	 * We will override the consumer in such a way that for a particular message,
+	 * processConsumedMessage will throw timeout exception. Exception will be thrown
+	 * after collecting message into the list. Since exception has been thrown, that
+	 * particular message will be pushed to the queue again. So, assertion is
+	 * whether the sentinelMessage is collected two times.
+	 * 
+	 * This timeout exception thrown part will be automatically done by
+	 * future.get(timeInSeconds) while actual execution.
+	 */
+	@Test
+	public void testTimeout() throws IOException, InterruptedException {
+		String queueName = "testTimeout" + UUID.randomUUID();
+		QueueService queueService = new FileBasedQueueService(queueName, 1000);
+
+		String sentinelMessage = "ERROR_MESSAGE";
+
+		List<String> pushList = Arrays.asList("Length1", "Length123", sentinelMessage, "123Length123Length", "f");
+
+		for (String message : pushList) {
+			queueService.push(message);
+		}
+
+		CommonUtils.markPushEnd(queueName);
+
+		ConsumerExecutor executor = new ConsumerExecutor() {
+
+			boolean alreadyThrown = false;
+
+			@Override
+			protected boolean processConsumedMessage(String message) throws IOException, TimeoutException {
+
+				super.processConsumedMessage(message);
+
+				if (message.equals(sentinelMessage) && !alreadyThrown) {
+					alreadyThrown = true;
+					throw new TimeoutException();
+				}
+
+				return true;
+			}
+
+		};
+
+		executor.dontPrintMessages();
+		executor.collectMessages();
+		executor.execute(queueName, 1);
+
+		List<String> collectedMessages = new ArrayList<>(executor.getMessages());
+		assertEquals(2, Collections.frequency(collectedMessages, sentinelMessage));
+	}
+
+	@AfterClass
+	public static void tearDown() {
+
+		List<File> files = CommonUtils.getFiles(".", FileQueue.EXTENSION);
+
+		files.forEach(file -> {
+			try {
+				FileUtils.forceDelete(file);
+			} catch (IOException e) {
+				System.out.println("Problem with deleting queue file - " + file.getAbsolutePath());
+			}
+		});
+	}
+
 }

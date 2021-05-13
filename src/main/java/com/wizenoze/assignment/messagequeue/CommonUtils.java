@@ -1,10 +1,15 @@
 package com.wizenoze.assignment.messagequeue;
 
+import java.io.File;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 
 public class CommonUtils {
@@ -64,7 +69,7 @@ public class CommonUtils {
 	public static boolean nextBool(MappedByteBuffer out) {
 		return out.get() != 0;
 	}
-	
+
 	public static void markPushEnd(String queueName) throws IOException {
 		FileQueue pushStatusQueue = new FileQueue(queueName + "-pushStatus", 1);
 		FileLock lock = pushStatusQueue.getLock();
@@ -72,4 +77,28 @@ public class CommonUtils {
 		lock.release();
 	}
 
+	public static List<File> getFiles(String dirName, String extension) {
+		File dir = new File(dirName);
+
+		File[] files = dir.listFiles(new FilenameFilter() {
+			public boolean accept(File dir, String filename) {
+				return filename.endsWith(extension);
+			}
+		});
+
+		return Arrays.asList(files);
+	}
+
+	public static void deleteAllFiles(String dirName, String extension) {
+
+		List<File> files = getFiles(dirName, FileQueue.EXTENSION);
+
+		files.forEach(file -> {
+			try {
+				FileUtils.forceDelete(file);
+			} catch (IOException e) {
+				System.out.println("Problem with deleting queue file - " + file.getAbsolutePath());
+			}
+		});
+	}
 }

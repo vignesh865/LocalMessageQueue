@@ -68,7 +68,7 @@ public class ProducerExecutor {
 
 				try {
 
-					boolean isSuccessful = queue.push(msg) != FileBasedQueueService.INVALID_POSITON;
+					boolean isSuccessful = queue.pushWithRetry(msg) != FileBasedQueueService.INVALID_POSITON;
 					if (isSuccessful) {
 						currentMessageCount++;
 					}

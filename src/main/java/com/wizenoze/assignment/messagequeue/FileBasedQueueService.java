@@ -3,11 +3,23 @@ package com.wizenoze.assignment.messagequeue;
 import java.io.IOException;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class FileBasedQueueService implements QueueService {
 
 	private final FileQueue queue;
 	private final FileQueue pushStatus;
+	private final FileQueue deadLetterQueue;
+
+	ExecutorService messageProcessor = Executors.newSingleThreadExecutor();
+
+	private static final int MESSAGE_TIMEOUT = 1;
+	private static final int PUSH_RETRY_COUNT = 3;
 
 	private static final int PULL_POSITION_META_START_BIT = 0;
 	public static final int PUSH_POSITION_META_START_BIT = 32;
@@ -19,6 +31,7 @@ public class FileBasedQueueService implements QueueService {
 
 	public FileBasedQueueService(String queueName, int size) throws IOException {
 		this.queue = new FileQueue(queueName, size);
+		this.deadLetterQueue = new FileQueue(queueName + "-dlq", size / 2);
 		this.pushStatus = new FileQueue(queueName + "-pushStatus", 1);
 		setInitialBits();
 	}
@@ -30,6 +43,10 @@ public class FileBasedQueueService implements QueueService {
 		} catch (EndOfDataException exception) {
 			this.queue.writeInt(DATA_START_INDEX, PUSH_POSITION_META_START_BIT);
 			this.queue.writeInt(DATA_START_INDEX, PULL_POSITION_META_START_BIT);
+
+			this.deadLetterQueue.writeInt(DATA_START_INDEX, PUSH_POSITION_META_START_BIT);
+			this.deadLetterQueue.writeInt(DATA_START_INDEX, PULL_POSITION_META_START_BIT);
+
 			this.pushStatus.writeBool(false, 0);
 		}
 	}
@@ -39,18 +56,60 @@ public class FileBasedQueueService implements QueueService {
 	}
 
 	@Override
-	public synchronized int push(String message) throws IOException {
+	public synchronized int push(String message) throws IOException, OverlappingFileLockException {
 		FileLock lock = null;
 		try {
 			lock = queue.getLock();
+			return pushMessage(queue, message);
+		} finally {
+			if (lock != null) {
+				lock.release();
+			}
+		}
+	}
 
-			int currentPosition = queue.fetchInt(PUSH_POSITION_META_START_BIT);
-			queue.writeString(message, currentPosition, MessageStatus.UNPROCESSED);
-			queue.writeInt(incrementedPosition(currentPosition, message.length()), PUSH_POSITION_META_START_BIT);
+	private static int pushMessage(FileQueue queue, String message) {
 
-			return currentPosition;
-		} catch (OverlappingFileLockException exception) {
-			return INVALID_POSITON;
+		int currentPosition = queue.fetchInt(PUSH_POSITION_META_START_BIT);
+		queue.writeString(message, currentPosition, MessageStatus.UNPROCESSED);
+		queue.writeInt(incrementedPosition(currentPosition, message.length()), PUSH_POSITION_META_START_BIT);
+
+		return currentPosition;
+	}
+
+	@Override
+	public synchronized int pushWithRetry(String message) throws IOException {
+		return pushWithRetry(message, 0);
+	}
+
+	private int pushWithRetry(String message, int retryCount) throws IOException {
+
+		try {
+
+			return push(message);
+		} catch (OverlappingFileLockException | IOException exception) {
+
+			if (retryCount >= PUSH_RETRY_COUNT) {
+				pushToDLQ(message);
+				return INVALID_POSITON;
+			}
+
+			return pushWithRetry(message, ++retryCount);
+		}
+	}
+
+	private synchronized void pushToDLQ(String message) throws IOException {
+
+		FileLock lock = null;
+		try {
+
+			lock = deadLetterQueue.getLock();
+			pushMessage(deadLetterQueue, message);
+
+		} catch (Exception exception) {
+			/*
+			 * Ignore failure occures while pushing to DLQ.
+			 */
 		} finally {
 			if (lock != null) {
 				lock.release();
@@ -63,7 +122,7 @@ public class FileBasedQueueService implements QueueService {
 		FileLock lock = null;
 
 		try {
-			
+
 			lock = queue.getLock();
 
 			final int currentPosition = queue.fetchInt(PULL_POSITION_META_START_BIT);
@@ -82,7 +141,7 @@ public class FileBasedQueueService implements QueueService {
 			 * Set the message status to IN_PROCESS. Release the file lock and send the
 			 * pulled message for processing.
 			 */
-			processMessage(message);
+			processMessageWithTimeout(message);
 
 			lock = queue.getLock();
 			queue.writeShortInt(MessageStatus.PROCESSED.status, statusPosition);
@@ -93,6 +152,19 @@ public class FileBasedQueueService implements QueueService {
 			if (lock != null) {
 				lock.release();
 			}
+		}
+	}
+
+	private boolean processMessageWithTimeout(String message) throws IOException {
+
+		try {
+
+			Future<Boolean> result = messageProcessor.submit(() -> processMessage(message));
+			return result.get(MESSAGE_TIMEOUT, TimeUnit.SECONDS);
+
+		} catch (InterruptedException | ExecutionException | TimeoutException e) {
+			pushWithRetry(message);
+			return false;
 		}
 	}
 
