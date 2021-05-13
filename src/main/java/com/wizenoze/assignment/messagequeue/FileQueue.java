@@ -13,7 +13,7 @@ public class FileQueue {
 	private final FileChannel channel;
 	private final MappedByteBuffer datasource;
 
-	// 500 mb
+	// 500 mb 524288000 bytes
 	public static final int DEFAULT_STORAGE_SIZE = 524288000;
 	private static final String EXTENSION = ".queue";
 
@@ -49,6 +49,16 @@ public class FileQueue {
 
 	public void setPosition(int position) {
 		datasource.position(position);
+	}
+
+	public void writeString(String message) {
+		writeInt(message.length());
+		datasource.put(message.getBytes());
+	}
+
+	public void writeString(String message, int at) {
+		setPosition(at);
+		writeString(message);
 	}
 
 	public void writeString(String message, MessageStatus status) {

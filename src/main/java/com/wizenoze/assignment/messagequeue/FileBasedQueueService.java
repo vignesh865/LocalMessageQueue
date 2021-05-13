@@ -63,6 +63,7 @@ public class FileBasedQueueService implements QueueService {
 		FileLock lock = null;
 
 		try {
+			
 			lock = queue.getLock();
 
 			final int currentPosition = queue.fetchInt(PULL_POSITION_META_START_BIT);
@@ -74,6 +75,16 @@ public class FileBasedQueueService implements QueueService {
 				return null;
 			}
 
+			queue.writeShortInt(MessageStatus.IN_PROCESS.status, statusPosition);
+			lock.release();
+
+			/*
+			 * Set the message status to IN_PROCESS. Release the file lock and send the
+			 * pulled message for processing.
+			 */
+			processMessage(message);
+
+			lock = queue.getLock();
 			queue.writeShortInt(MessageStatus.PROCESSED.status, statusPosition);
 			return message;
 		} catch (EndOfDataException | OverlappingFileLockException exception) {

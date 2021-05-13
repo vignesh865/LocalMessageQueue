@@ -5,9 +5,8 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Queue;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -134,6 +133,28 @@ public class QueueServiceTest {
 	}
 
 	@Test
+	public void testMessageOfDifferentLength() throws IOException {
+		String queueName = "testMessageOfDifferentLength" + UUID.randomUUID();
+		QueueService queueService = new FileBasedQueueService(queueName, 1000);
+
+		List<String> pushList = Arrays.asList("Length1", "Length123", "123Length123Length", "f");
+
+		for (String message : pushList) {
+			queueService.push(message);
+		}
+
+		CommonUtils.markPushEnd(queueName);
+
+		ConsumerExecutor executor = new ConsumerExecutor();
+		executor.dontPrintMessages();
+		executor.collectMessages();
+		executor.execute(queueName, 1);
+
+		List<String> collectedMessages = new ArrayList<>(executor.getMessages());
+		assertTrue(pushList.equals(collectedMessages));
+	}
+
+	@Test
 	public void testDelete() throws IOException {
 		String queueName = "delete" + UUID.randomUUID();
 		QueueService queueService = new FileBasedQueueService(queueName, 1000);
@@ -177,15 +198,5 @@ public class QueueServiceTest {
 		 * exception
 		 */
 		queueService.delete(deleteMessageId);
-	}
-
-	private void pushMessages(QueueService queueService, int count) {
-		IntStream.range(0, count).forEach(num -> {
-			String message = "testMessage" + num;
-			try {
-				queueService.push(message);
-			} catch (IOException e) {
-			}
-		});
 	}
 }

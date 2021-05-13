@@ -14,4 +14,8 @@ public interface QueueService {
 
 	void shutdown() throws IOException;
 
+	default void processMessage(String message) throws IOException {
+		System.out.println(message + "***");
+	}
+
 }

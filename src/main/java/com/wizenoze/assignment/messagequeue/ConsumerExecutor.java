@@ -12,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ConsumerExecutor {
 
@@ -24,6 +25,7 @@ public class ConsumerExecutor {
 	 */
 	private final AtomicBoolean shouldCollectMessages = new AtomicBoolean();
 	private final AtomicBoolean shouldPrintMessages = new AtomicBoolean(true);
+	private final AtomicInteger totalMessageConsumed = new AtomicInteger();
 
 	private final BlockingQueue<String> messages = new LinkedBlockingQueue<>();
 
@@ -59,6 +61,7 @@ public class ConsumerExecutor {
 
 		consumers.forEach(Consumer::shutdown);
 
+		System.out.print("Total consumed message count - " + totalMessageConsumed.get());
 		return totalConsumedCount;
 	}
 
@@ -66,27 +69,42 @@ public class ConsumerExecutor {
 
 		final String consumerId;
 		final QueueService queueService;
+		final AtomicInteger consumedCount = new AtomicInteger();
 
 		Consumer(String consumerId, String topic) throws IOException {
 			this.consumerId = consumerId;
-			this.queueService = new FileBasedQueueService(topic, queueSize);
+			this.queueService = getFileBasedQueueService(topic, queueSize);
 		}
 
 		@Override
 		public Integer call() throws Exception {
-			return consume(consumerId, queueService);
+			consume(consumerId, queueService);
+			return consumedCount.get();
 		}
 
-		public int consume(String consumerId, QueueService testQueue) throws Exception {
+		public void consume(String consumerId, QueueService queueService) throws Exception {
 
-			int currentMessageCount = 0;
-			while (!testQueue.hasAllMessagesConsumed()) {
-				String message = null;
+			while (!queueService.hasAllMessagesConsumed()) {
 
-				message = testQueue.pull();
+				/*
+				 * This will pull the message and call the processMessage method which can be
+				 * overridden at the time of QueueService object creation
+				 * See @method{getFileBasedQueueService}
+				 */
+				queueService.pull();
+			}
 
-				if (message != null) {
-					currentMessageCount++;
+			System.out.println(String.format("Total %s messages consumed by %s", consumedCount.get(), consumerId));
+		}
+
+		private QueueService getFileBasedQueueService(String queueName, int queueSize) throws IOException {
+
+			return new FileBasedQueueService(queueName, queueSize) {
+
+				@Override
+				public void processMessage(String message) throws IOException {
+					totalMessageConsumed.incrementAndGet();
+					consumedCount.incrementAndGet();
 
 					if (shouldCollectMessages.get()) {
 						messages.add(message);
@@ -96,12 +114,7 @@ public class ConsumerExecutor {
 						System.out.println(message);
 					}
 				}
-
-			}
-
-			System.out.println(String.format("Total %s messages consumed by %s", currentMessageCount, consumerId));
-
-			return currentMessageCount;
+			};
 		}
 
 		public void shutdown() {
