@@ -2,7 +2,7 @@
 
 ## Overview
 
-LocalMessageQueue is a simple message queue implementation in Java that supports horizontal scalability, decoupling, and asynchronicity between applications. This project aims to provide a file-based message queue suitable for local development and testing, supporting both single-host and multi-JVM scenarios.
+LocalMessageQueue is a memmap file-based message queue implementation in Java that supports horizontal scalability, decoupling, and asynchronicity between applications. This project aims to provide a file-based message queue suitable for local development and testing, supporting both single-host and multi-JVM scenarios.
 
 ## Features
 
